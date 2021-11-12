@@ -1,0 +1,147 @@
+USE [dbGeoInterf]
+GO
+/****** Object:  StoredProcedure [dbo].[SP_EMEvsGEO]    Script Date: 12/11/2021 14:31:04 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- =============================================
+-- Author:		WILSON MILTOS
+-- Create date: 08/11/2021
+-- Description:	Reporte de productos inactivos en EME vs activos en GEO
+-- =============================================
+ALTER PROCEDURE [dbo].[SP_EMEvsGEO] 
+AS
+BEGIN 
+
+
+		SET NOCOUNT ON;
+				DECLARE @TSQL varchar(8000)	
+				DECLARE @localc VARCHAR(20)
+				declare @acumular NVARCHAR(MAX)
+				declare @fecha varchar(10)
+				DECLARE	@nro_local varchar(10)
+
+				set @fecha = CONVERT(VARCHAR(10), GETDATE(), 120)
+				delete from tmp_eme_vs_geo
+		print 'pasa 1'
+		SET @acumular = '<style type="text/css">
+				#box-table
+				{
+				font-family: "Lucida Sans Unicode", "Lucida Grande", Sans-Serif;
+				font-size: 10px;
+				text-align: center;
+				border-collapse: collapse;
+				border-top: 7px solid #A0C1E9;
+				border-bottom: 7px solid #A0C1E9;
+				}
+				#box-table th
+				{
+				font-size: 12px;
+				font-weight: normal;
+				background: #B8D6FA;
+				border-right: 2px solid #A0C1E9;
+				border-left: 2px solid #A0C1E9;
+				border-bottom: 2px solid #A0C1E9;
+				color: #039;
+				}
+				#box-table td
+				{
+				border-right: 2px solid #aabcfe;
+				border-left: 2px solid #aabcfe;
+				border-bottom: 2px solid #aabcfe;
+				color: #000000;
+				}
+				tr:nth-child(odd) { background-color:#fff; }
+				tr:nth-child(even) { background-color:#fff; }
+				</style><h3><font color="DarkSlateGray"> Productos con Ventas en Geo e Inactivos en EME - Fecha: '+ @fecha +' </h3>
+				<table id="box-table">
+					<tr><font color="darkblue">
+						<th style="width:130px">   Cod.Local  </th>
+						<th style="width:200px">   Local  </th>
+						<th style="width:130px">   PLU </th>
+						<th style="width:130px">   Descripción </th>
+						<th style="width:130px">   Activo EME </th>
+						<th style="width:130px">   Activo Venta  </th>
+						<th style="width:130px">   Venta Local </th>
+						<th style="width:200px">   Activo Sucursal  </th>
+					</tr>';
+
+					print 'pasa 2'
+							begin------------------------------------------INICIO DEL CURSOR
+								DECLARE c_sucursales CURSOR 
+								FOR SELECT id from sucursales where id not in (777,3,5,299) and codigo_sap is not null and activo = 1 and reporteSap = 1
+								OPEN c_sucursales
+								FETCH NEXT FROM c_sucursales INTO @nro_local
+								WHILE @@fetch_status = 0
+								BEGIN
+										begin
+											begin transaction
+											SELECT @localc = id FROM Sucursales WHERE id = @nro_local and activo = 1 and reporteSap = 1
+					print @localc
+					print 'pasa 3'
+
+					SELECT @TSQL = 'select b.nrolocal, b.local,b.plu,b.producto,b.ACTIVO_EME, b.activo_venta,b.activo_venta_local,b.estadoeme from
+					(select *
+					from openquery(Digitalizacion, ''select DISTINCT item, PrecioUnitario from GeoItems where Tienda = '+@localc+' and fechaventa >= DATE_SUB(NOW(),INTERVAL 36 HOUR)'')) a inner join
+					  (select * from openquery(emedb,''SELECT DISTINCT st.destination_id as nrolocal, d.description as local,
+								  P.ID AS ID_PRODUCTO ,
+								  L.ID      AS PLU ,
+								  P.DESCRIPTION as producto,
+								  DECODE(P.ACTIVE,0,''''NO'''',1,''''SI'''')  AS ACTIVO_EME ,
+								  DECODE(P.SALE,0,''''NO'''',1,''''SI'''')    AS ACTIVO_VENTA,
+								  DECODE(ST.SALE,0,''''NO'''',1,''''SI'''')   AS ACTIVO_VENTA_LOCAL ,
+								  DECODE(ST.ACTIVE,0,''''NO'''',1,''''SI'''') AS ESTADOEME
+					FROM EMEDB.PRICING pr INNER JOIN EMEDB.PRODUCT p                            ON p.id = pr.PRODUCT_ID
+															 INNER JOIN EMEDB.PRODUCT_LOOK_UP l ON l.PRODUCT_ID = p.id
+															 INNER JOIN STOCK ST                                ON ST.PRODUCT_ID      = l.PRODUCT_ID
+															 INNER JOIN DESTINATION  d                       ON d.id = ST.DESTINATION_ID
+															 AND ST.DESTINATION_ID = pr.DESTINATION_ID 
+															 INNER JOIN EMEDB.stock_level_depo sld       on sld.sale_room_level_id = st.sale_room_level_id
+															 INNER JOIN STOCK S                             ON s.product_id=pr.product_id
+					WHERE 
+					d.local_number = '+@localc+''')) b on b.plu = a.item where b.ACTIVO_EME = ''NO''' 
+
+					print 'pasa 4'
+                         --insertamos en la tabla
+						insert into [dbo].[tmp_eme_vs_geo] (nrolocal, local, plu, producto, activoeme, activoventa, activoventalocal, estadoeme)
+						EXEC(@TSQL)
+						commit
+					end
+					begin
+						DECLARE	@nrolocal varchar(16), @local varchar(60), @plu varchar(10), @producto varchar(10), @activo_eme varchar(100), @activo_venta varchar(10), @activo_venta_local varchar(10), @estadoeme varchar(10)
+						DECLARE c_cursor CURSOR 
+
+						FOR SELECT distinct nrolocal, local, plu, producto, activoeme, activoventa, activoventalocal, estadoeme from tmp_eme_vs_geo order by nrolocal
+						OPEN c_cursor
+						FETCH NEXT FROM c_cursor INTO @nrolocal, @local, @plu, @producto, @activo_eme, @activo_venta, @activo_venta_local, @estadoeme
+						WHILE @@fetch_status = 0
+						BEGIN
+							set @acumular = @acumular+'<tr><td>'+@nrolocal+'</td><td>'+@local+'</td><td>'+@plu+'</td><td>'+@producto+'</td><td>'+@activo_eme+'</td><td>'+@activo_venta+'</td><td>'+@activo_venta_local+'</td><td>'+@estadoeme+'</td></tr>'
+							FETCH NEXT FROM c_cursor INTO @nrolocal, @local, @plu, @producto, @activo_eme, @activo_venta, @activo_venta_local, @estadoeme
+						END
+						CLOSE c_cursor
+						DEALLOCATE c_cursor	
+					end
+
+				FETCH NEXT FROM c_sucursales INTO @nro_local
+			END
+			CLOSE c_sucursales
+			DEALLOCATE c_sucursales 
+		end------------------------------------------fin DEL CURSOR
+		SET @acumular = @acumular + '</table>';
+END 
+print 'pasa 5'
+
+BEGIN
+	EXEC msdb.dbo.sp_send_dbmail
+		@profile_name = N'mailprofile',
+		@recipients = N'carla.romanach@stock.com.py; Maria-Britez@aj.com.py; csosa@superseis.com.py; Hugo-Britez@ajvierci.com.py; mleguizamon@aj.com.py; William-Villalba@aj.com.py; VictorHugo-FernandezC@aj.com.py; Wilson-Miltos@ajvierci.com.py; cwoelker@grupovierci.com; Javier-Dominguez@aj.com.py; Juan-Figueredo@aj.com.py; Victor-Areco@aj.com.py; DL_Analistas_EME@aj.com.py',  
+		--@recipients = N'Wilson-Miltos@ajvierci.com.py',   
+
+		@body_format = 'HTML',
+		@body = @acumular,
+		@subject = 'Productos Vendidos en GEO e inactivos en EME' ;
+		select 1;
+END
+print 'pasa 6'
